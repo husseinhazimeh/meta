@@ -40,15 +40,17 @@ void ir_eval::init_index(const std::string& path)
 
     // four (or three) fields per line
     query_id q_id;
-    uint8_t unused; // TREC compatability, optional
+    uint64_t unused; // TREC compatability, optional
     doc_id d_id;
-    uint8_t relevance;
+    uint64_t relevance;
 
     while (in.good())
     {
         std::getline(in, line);
         bool trec = (std::count_if(line.begin(), line.end(), [](char ch)
-        { return ch == ' '; }) == 3); // 3 spaces == 4 columns
+                                   {
+                                       return ch == ' ';
+                                   }) == 3); // 3 spaces == 4 columns
         std::istringstream iss{line};
         iss >> q_id;
         if (trec)
@@ -56,12 +58,12 @@ void ir_eval::init_index(const std::string& path)
         iss >> d_id;
         iss >> relevance;
 
-        if (relevance != '0')
+        if (relevance > 0)
             qrels_[q_id][d_id] = relevance;
     }
 }
 
-double ir_eval::precision(const std::vector<std::pair<doc_id, double>>& results,
+double ir_eval::precision(const std::vector<search_result>& results,
                           query_id q_id, uint64_t num_docs) const
 {
     if (results.empty())
@@ -75,8 +77,8 @@ double ir_eval::precision(const std::vector<std::pair<doc_id, double>>& results,
     return relevant_retrieved(results, q_id, num_docs) / denominator;
 }
 
-double ir_eval::recall(const std::vector<std::pair<doc_id, double>>& results,
-                       query_id q_id, uint64_t num_docs) const
+double ir_eval::recall(const std::vector<search_result>& results, query_id q_id,
+                       uint64_t num_docs) const
 {
     if (results.empty())
         return 0.0;
@@ -88,16 +90,15 @@ double ir_eval::recall(const std::vector<std::pair<doc_id, double>>& results,
     return relevant_retrieved(results, q_id, num_docs) / ht->second.size();
 }
 
-double ir_eval::relevant_retrieved(const std::vector
-                                   <std::pair<doc_id, double>>& results,
+double ir_eval::relevant_retrieved(const std::vector<search_result>& results,
                                    query_id q_id, uint64_t num_docs) const
 {
     double rel = 0.0;
     const auto& ht = qrels_.find(q_id);
     uint64_t i = 1;
-    for (auto& res : results)
+    for (auto& result : results)
     {
-        if (map::safe_at(ht->second, res.first) != 0)
+        if (map::safe_at(ht->second, result.d_id) != 0)
             ++rel;
         if (i++ == num_docs)
             break;
@@ -106,8 +107,8 @@ double ir_eval::relevant_retrieved(const std::vector
     return rel;
 }
 
-double ir_eval::f1(const std::vector<std::pair<doc_id, double>>& results,
-                   query_id q_id, uint64_t num_docs, double beta) const
+double ir_eval::f1(const std::vector<search_result>& results, query_id q_id,
+                   uint64_t num_docs, double beta) const
 {
     double p = precision(results, q_id, num_docs);
     double r = recall(results, q_id, num_docs);
@@ -120,8 +121,8 @@ double ir_eval::f1(const std::vector<std::pair<doc_id, double>>& results,
     return numerator / denominator;
 }
 
-double ir_eval::ndcg(const std::vector<std::pair<doc_id, double>>& results,
-                     query_id q_id, uint64_t num_docs) const
+double ir_eval::ndcg(const std::vector<search_result>& results, query_id q_id,
+                     uint64_t num_docs) const
 {
     // find this query's judgements
     const auto& ht = qrels_.find(q_id);
@@ -131,16 +132,16 @@ double ir_eval::ndcg(const std::vector<std::pair<doc_id, double>>& results,
     // calculate discounted cumulative gain
     double dcg = 0.0;
     uint64_t i = 1;
-    for (auto& res : results)
+    for (auto& result : results)
     {
-        double rel = map::safe_at(ht->second, res.first); // 0 if non-relevant
-        dcg += (std::pow(2.0, rel) - 1.0) / std::log(i + 1.0);
+        auto rel = map::safe_at(ht->second, result.d_id); // 0 if non-relevant
+        dcg += (std::pow(2.0, rel) - 1.0) / std::log2(i + 1.0);
         if (i++ == num_docs)
             break;
     }
 
     // calculate ideal DCG
-    std::vector<uint8_t> rels;
+    std::vector<uint64_t> rels;
     for (const auto& s : ht->second)
         rels.push_back(s.second);
     std::sort(rels.begin(), rels.end());
@@ -149,7 +150,7 @@ double ir_eval::ndcg(const std::vector<std::pair<doc_id, double>>& results,
     i = 1;
     for (auto& rel : rels)
     {
-        idcg += (std::pow(2.0, rel) + 1.0) / std::log(i + 1.0);
+        idcg += (std::pow(2.0, rel) - 1.0) / std::log2(i + 1.0);
         if (i++ == num_docs)
             break;
     }
@@ -157,8 +158,8 @@ double ir_eval::ndcg(const std::vector<std::pair<doc_id, double>>& results,
     return dcg / idcg;
 }
 
-double ir_eval::avg_p(const std::vector<std::pair<doc_id, double>>& results,
-                      query_id q_id, uint64_t num_docs)
+double ir_eval::avg_p(const std::vector<search_result>& results, query_id q_id,
+                      uint64_t num_docs)
 {
     const auto& ht = qrels_.find(q_id);
     if (ht == qrels_.end() || results.empty())
@@ -167,39 +168,51 @@ double ir_eval::avg_p(const std::vector<std::pair<doc_id, double>>& results,
         return 0.0;
     }
 
+    // the total number of *possible* relevant documents given the num_docs
+    // cutoff point
+    auto total_relevant = std::min<uint64_t>(num_docs, ht->second.size());
     uint64_t i = 1;
     double avgp = 0.0;
     double num_rel = 1;
-    for (auto& res : results)
+    for (auto& result : results)
     {
-        if (map::safe_at(ht->second, res.first) != 0)
+        if (map::safe_at(ht->second, result.d_id) != 0)
         {
             avgp += num_rel / i;
             ++num_rel;
         }
-        if (i++ == num_docs)
+        if (num_rel - 1 == total_relevant)
             break;
+        ++i;
     }
 
-    scores_.push_back(avgp / (i - 1.0));
-    return avgp / (i - 1.0);
+    scores_.push_back(avgp / total_relevant);
+    return avgp / total_relevant;
 }
 
 double ir_eval::map() const
 {
+    if (scores_.empty())
+        return 0.0;
+
     return std::accumulate(scores_.begin(), scores_.end(), 0.0)
            / scores_.size();
 }
 
 double ir_eval::gmap() const
 {
+    if (scores_.empty())
+        return 0.0;
+
     double sum = 0.0;
     for (auto& s : scores_)
-        sum += std::log(s + 1.0);
-    return sum / scores_.size();
+        if (s > 0.0)
+            sum += std::log(s);
+
+    return std::exp(sum / scores_.size());
 }
 
-void ir_eval::print_stats(const std::vector<std::pair<doc_id, double>>& results,
+void ir_eval::print_stats(const std::vector<search_result>& results,
                           query_id q_id, std::ostream& out)
 {
     auto w1 = std::setw(8);

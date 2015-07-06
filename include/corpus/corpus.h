@@ -15,6 +15,8 @@
 
 #include "meta.h"
 #include "corpus/document.h"
+#include "corpus/metadata_parser.h"
+#include "util/optional.h"
 
 namespace meta
 {
@@ -23,6 +25,20 @@ namespace corpus
 
 /**
  * Provides interface to with multiple corpus input formats.
+ *
+ * Required config parameters:
+ * ~~~toml
+ * prefix = "prefix"
+ * dataset = "datasetname" # relative to prefix
+ * corpus = "corpus-spec-file" # e.g. "line.toml"
+ * ~~~
+ *
+ * The corpus spec toml file also requires a corpus type and an optional
+ * encoding for the corpus text.
+ *
+ * Optional config parameters: none.
+ *
+ * @see https://meta-toolkit.org/overview-tutorial.html
  */
 class corpus
 {
@@ -47,6 +63,11 @@ class corpus
      * @return the number of documents in this corpus
      */
     virtual uint64_t size() const = 0;
+
+    /**
+     * @return the corpus' metadata schema
+     */
+    virtual metadata::schema schema() const;
 
     /**
      * Destructor.
@@ -74,9 +95,20 @@ class corpus
         using std::runtime_error::runtime_error;
     };
 
+  protected:
+    /**
+     * Helper function to be used by deriving classes in implementing
+     * next() to set the metadata for the current document.
+     */
+    std::vector<metadata::field> next_metadata();
+
   private:
+    void set_metadata_parser(metadata_parser&& mdparser);
+
     /// The type of encoding this document uses
     std::string encoding_;
+    /// The metadata parser
+    util::optional<metadata_parser> mdata_parser_;
 };
 }
 }

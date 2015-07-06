@@ -28,10 +28,10 @@ class file_corpus : public corpus
 {
   public:
     /**
-     * @param prefix The path to where the files are located
+     * @param prefix Path to where the files are located
      * @param doc_list A file containing the path to each document in the
-     * corpus
-     * @param encoding the encoding of the corpus
+     * corpus preceded by a class label (or "[none]")
+     * @param encoding The encoding of the corpus
      */
     file_corpus(const std::string& prefix, const std::string& doc_list,
                 std::string encoding);
@@ -50,6 +50,11 @@ class file_corpus : public corpus
      * @return the number of documents in this corpus
      */
     uint64_t size() const override;
+
+    /**
+     * @return the metadata schema for this corpus
+     */
+    metadata::schema schema() const override;
 
   private:
     /// the current document we are on

@@ -5,6 +5,8 @@
 
 #include "corpus/file_corpus.h"
 #include "io/parser.h"
+#include "util/filesystem.h"
+#include "utf/utf.h"
 
 namespace meta
 {
@@ -28,7 +30,10 @@ file_corpus::file_corpus(const std::string& prefix, const std::string& doc_list,
             docs_.emplace_back(std::make_pair(file, label));
         }
         else
-            docs_.emplace_back(std::make_pair(line, class_label{""}));
+        {
+            throw corpus_exception{"document list needs class label prefix "
+                                   "(add [none] if there are no labels)"};
+        }
         ++idx;
     }
 }
@@ -40,8 +45,19 @@ bool file_corpus::has_next() const
 
 document file_corpus::next()
 {
-    document doc{prefix_ + docs_[cur_].first, doc_id{cur_}, docs_[cur_].second};
-    doc.encoding(encoding());
+    document doc{doc_id{cur_}, docs_[cur_].second};
+
+    if (!filesystem::file_exists(prefix_ + docs_[cur_].first))
+        throw corpus_exception{"file \"" + docs_[cur_].first
+                               + "\" does not exist"};
+
+    doc.content(filesystem::file_text(prefix_ + docs_[cur_].first), encoding());
+
+    auto mdata = next_metadata();
+    // add "path" metadata manually
+    mdata.insert(mdata.begin(), metadata::field{prefix_ + docs_[cur_].first});
+    doc.mdata(std::move(mdata));
+
     ++cur_;
     return doc;
 }
@@ -49,6 +65,14 @@ document file_corpus::next()
 uint64_t file_corpus::size() const
 {
     return docs_.size();
+}
+
+metadata::schema file_corpus::schema() const
+{
+    auto schema = corpus::schema();
+    schema.insert(schema.begin(),
+                  metadata::field_info{"path", metadata::field_type::STRING});
+    return schema;
 }
 }
 }

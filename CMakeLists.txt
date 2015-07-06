@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.0.0)
 project(meta)
 
 option(USE_LIBCXX "Use libc++ for the C++ standard library" ON)
+option(ENABLE_PROFILING "Link against gperftools profiler library" OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
@@ -14,7 +15,6 @@ include(FindZLIB)
 
 include_directories(include/)
 
-
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/deps/findicu)
 find_package(Threads REQUIRED)
 find_package(ICU COMPONENTS data i18n uc REQUIRED)
@@ -24,7 +24,7 @@ if(ZLIB_FOUND)
   include_directories(SYSTEM ${ZLIB_INCLUDE_DIRS})
 endif()
 
-if(UNIX)
+if(UNIX OR MINGW)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic")
 
     # if we don't already set the standard for the compiler, detect the
@@ -76,16 +76,24 @@ if(UNIX)
             message("-- Locating libc++...")
             find_library(LIBCXX_LIBRARY NAMES c++ cxx)
             if(LIBCXX_LIBRARY)
-                message("-- Located libc++, using it.")
+                message("-- Located libc++: ${LIBCXX_LIBRARY}")
                 set(LIBCXX_OPTIONS "-stdlib=libc++")
+                get_filename_component(LIBCXX_LIB_PATH ${LIBCXX_LIBRARY}
+                                       DIRECTORY)
+                find_path(LIBCXX_PREFIX c++/v1/algorithm
+                          PATHS ${LIBCXX_LIB_PATH}/../include
+                          ${CMAKE_SYSTEM_PREFIX_PATH})
+                set(LIBCXX_INCLUDE_DIR ${LIBCXX_PREFIX}/c++/v1/)
+                message("-- Located libc++ include path: ${LIBCXX_INCLUDE_DIR}")
+
                 message("--     Locating libc++'s abi...")
                 find_library(LIBCXXABI_LIBRARY NAMES c++abi)
                 find_library(LIBCXXRT_LIBRARY NAMES cxxrt)
                 if(LIBCXXABI_LIBRARY)
-                    message("--     Found libc++abi, using it.")
+                    message("--     Found libc++abi: ${LIBCXXABI_LIBRARY}")
                     set(CXXABI_LIBRARY ${LIBCXXABI_LIBRARY})
                 elseif(LIBCXXRT_LIBRARY)
-                    message("--     Found libcxxrt, using it.")
+                    message("--     Found libcxxrt: ${LIBCXXRT_LIBRARY}")
                     set(CXXABI_LIBRARY ${LIBCXXRT_LIBRARY})
                 else()
                     message("--     No abi library found. "
@@ -102,8 +110,16 @@ if(UNIX)
       set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${LIBDL_LIBRARY}")
     endif()
 
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LIBCXX_OPTIONS}")
-    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${CXXABI_LIBRARY}")
+    if(LIBCXX_OPTIONS)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LIBCXX_OPTIONS}")
+    endif()
+
+    if(CXXABI_LIBRARY)
+      set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${LIBCXX_OPTIONS} ${CXXABI_LIBRARY} -L${LIBCXX_LIB_PATH}")
+    endif()
+    if(LIBCXX_INCLUDE_DIR)
+      set(CMAKE_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES} ${LIBCXX_INCLUDE_DIR}")
+    endif()
 endif()
 
 add_library(meta-definitions INTERFACE)
@@ -121,6 +137,22 @@ endif()
 
 if(LIBDL_LIBRARY)
   target_link_libraries(meta-definitions INTERFACE ${LIBDL_LIBRARY})
+endif()
+
+if(CXXABI_LIBRARY)
+  target_link_libraries(meta-definitions INTERFACE ${CXXABI_LIBRARY})
+endif()
+
+if(LIBCXX_LIBRARY)
+  target_include_directories(meta-definitions SYSTEM INTERFACE ${LIBCXX_INCLUDE_DIR})
+  target_compile_options(meta-definitions INTERFACE ${LIBCXX_OPTIONS})
+  target_link_libraries(meta-definitions INTERFACE -L${LIBCXX_LIB_PATH})
+endif()
+
+if(ENABLE_PROFILING)
+  find_library(GPERFTOOLS_PROFILER NAMES profiler REQUIRED)
+  message("-- Found profiler: ${GPERFTOOLS_PROFILER}")
+  target_link_libraries(meta-definitions INTERFACE ${GPERFTOOLS_PROFILER})
 endif()
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
@@ -173,6 +205,11 @@ if(ICU_VERSION VERSION_LESS "4.4")
   target_compile_definitions(meta-definitions INTERFACE
                              -DMETA_ICU_NO_TEMP_SUBSTRING)
 endif()
+
+if(BIICODE)
+  include(contrib/biicode/CMakeLists.txt)
+  return()
+ENDIF()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 

@@ -22,6 +22,17 @@ namespace index
  * can be viewed as a linear interpolation between the query term probablity
  * and the collection term probability. The model parameter lambda is the
  * weighting of this interpolation.
+ *
+ * Required config parameters:
+ * ~~~toml
+ * [ranker]
+ * method = "jelinek-mercer"
+ * ~~~
+ *
+ * Optional config parameters:
+ * ~~~toml
+ * lambda = 0.7
+ * ~~~
  */
 class jelinek_mercer : public language_model_ranker
 {
@@ -30,28 +41,28 @@ class jelinek_mercer : public language_model_ranker
     const static std::string id;
 
     /// Default value of lambda
-    const static constexpr double default_lambda = 0.7;
+    const static constexpr float default_lambda = 0.7f;
 
     /**
      * @param lambda
      */
-    jelinek_mercer(double lambda = default_lambda);
+    jelinek_mercer(float lambda = default_lambda);
 
     /**
      * Calculates the smoothed probability of a term.
      * @param sd
      */
-    double smoothed_prob(const score_data& sd) const override;
+    float smoothed_prob(const score_data& sd) const override;
 
     /**
      * A document-dependent constant.
      * @param sd
      */
-    double doc_constant(const score_data& sd) const override;
+    float doc_constant(const score_data& sd) const override;
 
   private:
     /// the JM parameter
-    const double lambda_;
+    const float lambda_;
 };
 
 /**

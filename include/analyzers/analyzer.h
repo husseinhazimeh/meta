@@ -72,6 +72,14 @@ class analyzer
         default_filter_chain(const cpptoml::table& config);
 
     /**
+     * @param config The config group used to create the analyzer from
+     * @return the default filter chain for unigram words for this version
+     * of MeTA, based on a config object
+     */
+    static std::unique_ptr<token_stream>
+        default_unigram_chain(const cpptoml::table& config);
+
+    /**
      * @param global The original config object with all parameters
      * @param config The config group used to create the filters from
      * @return a filter chain as specified by a config object
@@ -88,18 +96,6 @@ class analyzer
     static std::unique_ptr<token_stream>
         load_filter(std::unique_ptr<token_stream> src,
                     const cpptoml::table& config);
-
-    /**
-     * @param doc The document to parse
-     * @param extension The possible file extension for this document if it
-     * is represented by a file on disk
-     * @param delims Possible character delimiters to use when parsing the
-     * file
-     * @return a parser suited to read data that this document represents
-     */
-    static io::parser create_parser(const corpus::document& doc,
-                                    const std::string& extension,
-                                    const std::string& delims);
 
     /**
      * @param doc The document to get content for

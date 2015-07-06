@@ -26,41 +26,47 @@ namespace analyzers
 
 std::string analyzer::get_content(const corpus::document& doc)
 {
-    if (doc.contains_content())
-        return utf::to_utf8(doc.content(), doc.encoding());
+    if (!doc.contains_content())
+        throw analyzer_exception{
+            "document content was not populated for analysis"};
 
-    io::mmap_file file{doc.path()};
-    return utf::to_utf8({file.begin(), file.size()}, doc.encoding());
+    return utf::to_utf8(doc.content(), doc.encoding());
 }
 
-io::parser analyzer::create_parser(const corpus::document& doc,
-                                   const std::string& extension,
-                                   const std::string& delims)
+namespace
 {
-    if (doc.contains_content())
-        return io::parser{doc.content(), delims,
-                          io::parser::input_type::String};
-    else
-        return io::parser{doc.path() + extension, delims,
-                          io::parser::input_type::File};
+std::unique_ptr<token_stream>
+    add_default_filters(std::unique_ptr<token_stream> tokenizer,
+                        const cpptoml::table& config)
+{
+    auto stopwords = config.get_as<std::string>("stop-words");
+
+    std::unique_ptr<token_stream> result;
+
+    result = make_unique<filters::lowercase_filter>(std::move(tokenizer));
+    result = make_unique<filters::alpha_filter>(std::move(result));
+    result = make_unique<filters::length_filter>(std::move(result), 2, 35);
+    result = make_unique<filters::list_filter>(std::move(result), *stopwords);
+    result = make_unique<filters::porter2_stemmer>(std::move(result));
+    return result;
+}
 }
 
 std::unique_ptr<token_stream>
     analyzer::default_filter_chain(const cpptoml::table& config)
 {
-
-    auto stopwords = config.get_as<std::string>("stop-words");
-
-    std::unique_ptr<token_stream> result;
-
-    result = make_unique<tokenizers::icu_tokenizer>();
-    result = make_unique<filters::lowercase_filter>(std::move(result));
-    result = make_unique<filters::alpha_filter>(std::move(result));
-    result = make_unique<filters::length_filter>(std::move(result), 2, 35);
-    result = make_unique<filters::list_filter>(std::move(result), *stopwords);
-    result = make_unique<filters::porter2_stemmer>(std::move(result));
+    auto tokenizer = make_unique<tokenizers::icu_tokenizer>();
+    auto result = add_default_filters(std::move(tokenizer), config);
     result = make_unique<filters::empty_sentence_filter>(std::move(result));
     return result;
+}
+
+std::unique_ptr<token_stream>
+    analyzer::default_unigram_chain(const cpptoml::table& config)
+{
+    // suppress "<s>", "</s>"
+    auto tokenizer = make_unique<tokenizers::icu_tokenizer>(true);
+    return add_default_filters(std::move(tokenizer), config);
 }
 
 std::unique_ptr<token_stream>
@@ -83,6 +89,8 @@ std::unique_ptr<token_stream>
     {
         if (*check == "default-chain")
             return default_filter_chain(global);
+        else if (*check == "default-unigram-chain")
+            return default_unigram_chain(global);
         else
             throw analyzer_exception{"unknown filter option: " + *check};
     }
